@@ -2,121 +2,234 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Car Rental Live Tracker</title>
+    <title>Elite Car Rental Manager</title>
     <style>
-        :root { --primary: #2c3e50; --accent: #3498db; --bg: #f4f7f6; }
-        body { font-family: sans-serif; background: var(--bg); padding: 20px; }
-        .container { max-width: 100%; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th { background: var(--primary); color: white; padding: 10px; font-size: 12px; }
-        td { border: 1px solid #ddd; padding: 5px; }
-        input { width: 90%; border: 1px solid #ccc; padding: 5px; border-radius: 3px; }
-        .due-today { background-color: #3498db !important; color: white; }
-        .due-today input { background: rgba(255,255,255,0.2); color: white; }
-        .btn-archive { background: #2ecc71; color: white; border: none; padding: 8px; cursor: pointer; border-radius: 4px; width: 100%; }
-        .loading { color: orange; font-weight: bold; }
+        :root { --primary: #2c3e50; --orange: #e67e22; --green: #2ecc71; --red: #e74c3c; }
+        body { font-family: 'Segoe UI', sans-serif; margin: 0; background: #f0f2f5; }
+        
+        /* Toolbar */
+        .toolbar { background: white; padding: 15px; position: sticky; top: 0; z-index: 100; display: flex; gap: 15px; align-items: center; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .btn { border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; font-weight: bold; color: white; transition: 0.2s; }
+        .btn-undo { background: #95a5a6; }
+        .btn-redo { background: #7f8c8d; }
+        .status-dot { width: 12px; height: 12px; border-radius: 50%; background: #ccc; }
+
+        /* Table & Layout */
+        .table-container { overflow-x: auto; padding: 20px; white-space: nowrap; }
+        table { border-collapse: collapse; background: white; min-width: 2200px; box-shadow: 0 5px 15px rgba(0,0,0,0.05); }
+        th { background: var(--primary); color: white; padding: 12px; text-align: left; font-size: 13px; position: sticky; top: 0; }
+        td { border: 1px solid #eee; padding: 4px; }
+        
+        /* Cells */
+        input { border: 1px solid transparent; padding: 8px; width: 100%; box-sizing: border-box; font-size: 14px; outline: none; }
+        input:focus { border-bottom: 2px solid var(--accent); background: #f9f9f9; }
+        .perm { font-weight: bold; color: #333; }
+
+        /* Conditional Colors */
+        .row-orange { background-color: var(--orange) !important; color: white; }
+        .row-orange input { color: white; }
+
+        /* Buttons */
+        .btn-add { background: var(--green); }
+        .btn-del { background: var(--red); padding: 5px 10px; font-size: 11px; }
+        .btn-finish { background: var(--primary); width: 100%; }
     </style>
 </head>
 <body>
 
-<div class="container">
-    <h2>🚗 Car Rental Dashboard <span id="status" class="loading">(Connecting...)</span></h2>
-    <table>
+<div class="toolbar">
+    <button class="btn btn-undo" onclick="undo()">⬅ Undo</button>
+    <button class="btn btn-redo" onclick="redo()">Redo ➡</button>
+    <div id="sync-status" class="status-dot" title="Not Synced"></div>
+    <span id="status-text">Connecting...</span>
+</div>
+
+<div class="table-container">
+    <table id="mainTable">
         <thead>
-            <tr>
-                <th>Car</th><th>Matricule</th><th>Client</th><th>Phone</th><th>Date Out</th>
-                <th>Time</th><th>Date In</th><th>Days</th><th>Price</th><th>Total</th>
-                <th>Adv.</th><th>Rem.</th><th>KM Out</th><th>KM In</th><th>Paid</th><th>Action</th>
-            </tr>
+            <tr id="headerRow"></tr>
         </thead>
-        <tbody id="tableBody">
-            </tbody>
+        <tbody id="tableBody"></tbody>
+        <tfoot>
+            <tr id="newCarRow" style="background: #eef;">
+                <td><button class="btn btn-add" onclick="addNewCar()">[+] Add</button></td>
+                <td><input type="text" id="newCarName" placeholder="New Car Name"></td>
+                <td><input type="text" id="newCarMat" placeholder="Matricule"></td>
+                <td colspan="14" style="color: #888; font-style: italic;">Fill Car/Matricule and click [+] to expand fleet</td>
+            </tr>
+        </tfoot>
     </table>
 </div>
 
 <script>
-    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycby2kGxxlUA4dYC40r20Zl-pkgRGC3EC-B5Lwg3xevLY5xLVcvqu6ror_9bs1TJ07jhfIQ/exec"; // <--- PUT YOUR URL HERE
-    const CAR_TOTAL = 7;
+    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxTn07TpH9MRz7KhZE1OCciJLYE8_pGmE_g-saKx1WDM23fPEYqkN_q2Hj8iEccTNfAUg/exec"; // <--- PASTE YOUR URL HERE
+    let stateHistory = [];
+    let redoStack = [];
+    let currentData = [];
 
-    // 1. Fetch data from Google Sheets when opening
-    async function loadData() {
+    // --- INITIALIZATION ---
+    async function init() {
         try {
             const response = await fetch(SCRIPT_URL);
-            const data = await response.json();
-            renderTable(data);
-            document.getElementById('status').innerText = "(Live)";
-            document.getElementById('status').style.color = "green";
-        } catch (e) {
-            document.getElementById('status').innerText = "(Error Connecting)";
-        }
+            currentData = await response.json();
+            renderTable();
+            saveState(); // Initial snapshot
+            updateStatus("Live", "green");
+        } catch (e) { updateStatus("Error", "red"); }
     }
 
-    function renderTable(sheetData) {
+    function renderTable() {
         const tbody = document.getElementById('tableBody');
+        const headerRow = document.getElementById('headerRow');
         tbody.innerHTML = "";
-        const today = new Date().toISOString().split('T')[0];
+        
+        // Headers
+        headerRow.innerHTML = currentData[0].map(h => `<th>${h}</th>`).join('') + "<th>Action</th>";
 
-        // We skip row 0 (headers) and loop 7 times for your cars
-        for (let i = 1; i <= CAR_TOTAL; i++) {
-            const rowArr = sheetData[i] || [];
-            const isDue = rowArr[6] && rowArr[6].split('T')[0] === today; // Date In is column 6
-            
+        const now = new Date();
+        const todayStr = now.toISOString().split('T')[0];
+        const currentTime = now.getHours() + ":" + now.getMinutes();
+
+        for (let i = 1; i < currentData.length; i++) {
+            const row = currentData[i];
             const tr = document.createElement('tr');
-            if (isDue) tr.classList.add('due-today');
+            
+            // Logic: Orange if DateIn is Today AND CurrentTime > RowTime
+            const rowDateIn = row[6] ? new Date(row[6]).toISOString().split('T')[0] : "";
+            const rowTimeIn = row[5] || "00:00";
+            if (rowDateIn === todayStr && currentTime > rowTimeIn) {
+                tr.classList.add('row-orange');
+            }
 
             tr.innerHTML = `
-                <td><input type="text" value="${rowArr[0] || ''}" onchange="sync(${i}, 0, this.value)"></td>
-                <td><input type="text" value="${rowArr[1] || ''}" onchange="sync(${i}, 1, this.value)"></td>
-                <td><input type="text" value="${rowArr[2] || ''}" onchange="sync(${i}, 2, this.value)"></td>
-                <td><input type="text" value="${rowArr[3] || ''}" onchange="sync(${i}, 3, this.value)"></td>
-                <td><input type="date" value="${rowArr[4] ? rowArr[4].split('T')[0] : ''}" onchange="sync(${i}, 4, this.value)"></td>
-                <td><input type="time" value="${rowArr[5] || ''}" onchange="sync(${i}, 5, this.value)"></td>
-                <td><input type="date" value="${rowArr[6] ? rowArr[6].split('T')[0] : ''}" onchange="sync(${i}, 6, this.value)"></td>
-                <td><input type="number" value="${rowArr[7] || ''}" onchange="sync(${i}, 7, this.value)"></td>
-                <td><input type="number" value="${rowArr[8] || ''}" onchange="sync(${i}, 8, this.value)"></td>
-                <td><input type="number" value="${rowArr[9] || ''}" onchange="sync(${i}, 9, this.value)"></td>
-                <td><input type="number" value="${rowArr[10] || ''}" onchange="sync(${i}, 10, this.value)"></td>
-                <td><input type="number" value="${rowArr[11] || ''}" onchange="sync(${i}, 11, this.value)"></td>
-                <td><input type="number" value="${rowArr[12] || ''}" onchange="sync(${i}, 12, this.value)"></td>
-                <td><input type="number" value="${rowArr[13] || ''}" onchange="sync(${i}, 13, this.value)"></td>
-                <td><input type="text" value="${rowArr[14] || ''}" onchange="sync(${i}, 14, this.value)"></td>
-                <td><button class="btn-archive" onclick="archive(${i})">Finish</button></td>
+                <td><input class="perm" value="${row[0]||''}" onchange="updateCell(${i},0,this.value)"></td>
+                <td><input class="perm" value="${row[1]||''}" onchange="updateCell(${i},1,this.value)"></td>
+                <td><input value="${row[2]||''}" onchange="updateCell(${i},2,this.value)"></td>
+                <td><input value="${row[3]||''}" onchange="updateCell(${i},3,this.value)"></td>
+                <td><input type="date" value="${row[4] ? new Date(row[4]).toISOString().split('T')[0] : ''}" onchange="updateCell(${i},4,this.value)"></td>
+                <td><input type="time" value="${row[5]||''}" onchange="updateCell(${i},5,this.value)"></td>
+                <td><input type="date" value="${row[6] ? new Date(row[6]).toISOString().split('T')[0] : ''}" onchange="updateCell(${i},6,this.value)"></td>
+                <td><input type="number" id="days-${i}" value="${row[7]||''}" onchange="calcTotal(${i},this.value,'days')"></td>
+                <td><input type="number" id="price-${i}" value="${row[8]||''}" onchange="calcTotal(${i},this.value,'price')"></td>
+                <td><input type="number" id="total-${i}" value="${row[9]||''}" onchange="calcRem(${i},this.value,'total')"></td>
+                <td><input type="number" id="adv-${i}" value="${row[10]||''}" onchange="calcRem(${i},this.value,'adv')"></td>
+                <td><input type="number" id="rem-${i}" value="${row[11]||''}" readonly></td>
+                <td><input type="number" value="${row[12]||''}" onchange="updateCell(${i},12,this.value)"></td>
+                <td><input type="number" value="${row[13]||''}" onchange="updateCell(${i},13,this.value)"></td>
+                <td><input type="text" value="${row[14]||''}" onchange="updateCell(${i},14,this.value)"></td>
+                <td style="display:flex; gap:5px;">
+                    <button class="btn btn-finish" onclick="archiveRow(${i})">Finish</button>
+                    <button class="btn btn-del" onclick="deleteRow(${i})">🗑</button>
+                </td>
             `;
             tbody.appendChild(tr);
         }
     }
 
-    // 2. Send data to Google Sheets when you change an input
-    async function sync(rowIdx, colIdx, value) {
-        document.getElementById('status').innerText = "(Saving...)";
-        // Get all data from that specific row to send
-        const inputs = document.querySelectorAll(`#tableBody tr`)[rowIdx-1].querySelectorAll('input');
-        const rowData = Array.from(inputs).map(input => input.value);
-
-        await fetch(SCRIPT_URL, {
-            method: "POST",
-            body: JSON.stringify({ action: "save", row: rowIdx, data: rowData })
-        });
-        document.getElementById('status').innerText = "(Live)";
+    // --- CALCULATIONS ---
+    function calcTotal(i, val, type) {
+        updateCell(i, (type === 'days' ? 7 : 8), val);
+        const days = document.getElementById(`days-${i}`).value || 0;
+        const price = document.getElementById(`price-${i}`).value || 0;
+        const total = days * price;
+        document.getElementById(`total-${i}`).value = total;
+        updateCell(i, 9, total);
+        calcRem(i, total, 'total');
     }
 
-    // 3. Move row to History
-    async function archive(rowIdx) {
-        if(!confirm("Move this rental to History?")) return;
-        document.getElementById('status').innerText = "(Archiving...)";
-        
-        const inputs = document.querySelectorAll(`#tableBody tr`)[rowIdx-1].querySelectorAll('input');
-        const rowData = Array.from(inputs).map(input => input.value);
-
-        await fetch(SCRIPT_URL, {
-            method: "POST",
-            body: JSON.stringify({ action: "archive", row: rowIdx, data: rowData })
-        });
-        location.reload(); // Refresh to show cleared row
+    function calcRem(i, val, type) {
+        updateCell(i, (type === 'total' ? 9 : 10), val);
+        const total = document.getElementById(`total-${i}`).value || 0;
+        const adv = document.getElementById(`adv-${i}`).value || 0;
+        const rem = total - adv;
+        document.getElementById(`rem-${i}`).value = rem;
+        updateCell(i, 11, rem);
     }
 
-    loadData();
+    // --- DATA MANAGEMENT ---
+    function updateCell(r, c, val) {
+        currentData[r][c] = val;
+        saveState();
+        syncAll();
+    }
+
+    async function syncAll() {
+        updateStatus("Saving...", "orange");
+        await fetch(SCRIPT_URL, {
+            method: "POST",
+            body: JSON.stringify({ action: "saveAll", data: currentData })
+        });
+        updateStatus("Live", "green");
+    }
+
+    function addNewCar() {
+        const name = document.getElementById('newCarName').value;
+        const mat = document.getElementById('newCarMat').value;
+        if (!name || !mat) return alert("Fill Name and Matricule");
+        if (!confirm(`Add ${name} to fleet?`)) {
+            document.getElementById('newCarName').value = "";
+            document.getElementById('newCarMat').value = "";
+            return;
+        }
+        const newRow = Array(15).fill("");
+        newRow[0] = name; newRow[1] = mat;
+        currentData.push(newRow);
+        document.getElementById('newCarName').value = "";
+        document.getElementById('newCarMat').value = "";
+        saveState();
+        renderTable();
+        syncAll();
+    }
+
+    function deleteRow(i) {
+        if (!confirm("Delete this car from fleet? (History will remain safe)")) return;
+        currentData.splice(i, 1);
+        saveState();
+        renderTable();
+        syncAll();
+    }
+
+    async function archiveRow(i) {
+        if (!confirm("Move to history and clear row?")) return;
+        updateStatus("Archiving...", "orange");
+        await fetch(SCRIPT_URL, {
+            method: "POST",
+            body: JSON.stringify({ action: "archive", row: i, data: currentData[i] })
+        });
+        location.reload();
+    }
+
+    // --- UNDO / REDO ---
+    function saveState() {
+        stateHistory.push(JSON.stringify(currentData));
+        if (stateHistory.length > 20) stateHistory.shift();
+        redoStack = [];
+        localStorage.setItem('carRentalHistory', JSON.stringify(stateHistory));
+    }
+
+    function undo() {
+        if (stateHistory.length <= 1) return;
+        redoStack.push(stateHistory.pop());
+        currentData = JSON.parse(stateHistory[stateHistory.length - 1]);
+        renderTable();
+        syncAll();
+    }
+
+    function redo() {
+        if (redoStack.length === 0) return;
+        const state = redoStack.pop();
+        stateHistory.push(state);
+        currentData = JSON.parse(state);
+        renderTable();
+        syncAll();
+    }
+
+    function updateStatus(txt, col) {
+        document.getElementById('status-text').innerText = txt;
+        document.getElementById('sync-status').style.backgroundColor = col;
+    }
+
+    init();
 </script>
-
 </body>
 </html>
