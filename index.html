@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Car Rental Live Tracker</title>
+    <style>
+        :root { --primary: #2c3e50; --accent: #3498db; --bg: #f4f7f6; }
+        body { font-family: sans-serif; background: var(--bg); padding: 20px; }
+        .container { max-width: 100%; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th { background: var(--primary); color: white; padding: 10px; font-size: 12px; }
+        td { border: 1px solid #ddd; padding: 5px; }
+        input { width: 90%; border: 1px solid #ccc; padding: 5px; border-radius: 3px; }
+        .due-today { background-color: #3498db !important; color: white; }
+        .due-today input { background: rgba(255,255,255,0.2); color: white; }
+        .btn-archive { background: #2ecc71; color: white; border: none; padding: 8px; cursor: pointer; border-radius: 4px; width: 100%; }
+        .loading { color: orange; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>🚗 Car Rental Dashboard <span id="status" class="loading">(Connecting...)</span></h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Car</th><th>Matricule</th><th>Client</th><th>Phone</th><th>Date Out</th>
+                <th>Time</th><th>Date In</th><th>Days</th><th>Price</th><th>Total</th>
+                <th>Adv.</th><th>Rem.</th><th>KM Out</th><th>KM In</th><th>Paid</th><th>Action</th>
+            </tr>
+        </thead>
+        <tbody id="tableBody">
+            </tbody>
+    </table>
+</div>
+
+<script>
+    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycby2kGxxlUA4dYC40r20Zl-pkgRGC3EC-B5Lwg3xevLY5xLVcvqu6ror_9bs1TJ07jhfIQ/exec"; // <--- PUT YOUR URL HERE
+    const CAR_TOTAL = 7;
+
+    // 1. Fetch data from Google Sheets when opening
+    async function loadData() {
+        try {
+            const response = await fetch(SCRIPT_URL);
+            const data = await response.json();
+            renderTable(data);
+            document.getElementById('status').innerText = "(Live)";
+            document.getElementById('status').style.color = "green";
+        } catch (e) {
+            document.getElementById('status').innerText = "(Error Connecting)";
+        }
+    }
+
+    function renderTable(sheetData) {
+        const tbody = document.getElementById('tableBody');
+        tbody.innerHTML = "";
+        const today = new Date().toISOString().split('T')[0];
+
+        // We skip row 0 (headers) and loop 7 times for your cars
+        for (let i = 1; i <= CAR_TOTAL; i++) {
+            const rowArr = sheetData[i] || [];
+            const isDue = rowArr[6] && rowArr[6].split('T')[0] === today; // Date In is column 6
+            
+            const tr = document.createElement('tr');
+            if (isDue) tr.classList.add('due-today');
+
+            tr.innerHTML = `
+                <td><input type="text" value="${rowArr[0] || ''}" onchange="sync(${i}, 0, this.value)"></td>
+                <td><input type="text" value="${rowArr[1] || ''}" onchange="sync(${i}, 1, this.value)"></td>
+                <td><input type="text" value="${rowArr[2] || ''}" onchange="sync(${i}, 2, this.value)"></td>
+                <td><input type="text" value="${rowArr[3] || ''}" onchange="sync(${i}, 3, this.value)"></td>
+                <td><input type="date" value="${rowArr[4] ? rowArr[4].split('T')[0] : ''}" onchange="sync(${i}, 4, this.value)"></td>
+                <td><input type="time" value="${rowArr[5] || ''}" onchange="sync(${i}, 5, this.value)"></td>
+                <td><input type="date" value="${rowArr[6] ? rowArr[6].split('T')[0] : ''}" onchange="sync(${i}, 6, this.value)"></td>
+                <td><input type="number" value="${rowArr[7] || ''}" onchange="sync(${i}, 7, this.value)"></td>
+                <td><input type="number" value="${rowArr[8] || ''}" onchange="sync(${i}, 8, this.value)"></td>
+                <td><input type="number" value="${rowArr[9] || ''}" onchange="sync(${i}, 9, this.value)"></td>
+                <td><input type="number" value="${rowArr[10] || ''}" onchange="sync(${i}, 10, this.value)"></td>
+                <td><input type="number" value="${rowArr[11] || ''}" onchange="sync(${i}, 11, this.value)"></td>
+                <td><input type="number" value="${rowArr[12] || ''}" onchange="sync(${i}, 12, this.value)"></td>
+                <td><input type="number" value="${rowArr[13] || ''}" onchange="sync(${i}, 13, this.value)"></td>
+                <td><input type="text" value="${rowArr[14] || ''}" onchange="sync(${i}, 14, this.value)"></td>
+                <td><button class="btn-archive" onclick="archive(${i})">Finish</button></td>
+            `;
+            tbody.appendChild(tr);
+        }
+    }
+
+    // 2. Send data to Google Sheets when you change an input
+    async function sync(rowIdx, colIdx, value) {
+        document.getElementById('status').innerText = "(Saving...)";
+        // Get all data from that specific row to send
+        const inputs = document.querySelectorAll(`#tableBody tr`)[rowIdx-1].querySelectorAll('input');
+        const rowData = Array.from(inputs).map(input => input.value);
+
+        await fetch(SCRIPT_URL, {
+            method: "POST",
+            body: JSON.stringify({ action: "save", row: rowIdx, data: rowData })
+        });
+        document.getElementById('status').innerText = "(Live)";
+    }
+
+    // 3. Move row to History
+    async function archive(rowIdx) {
+        if(!confirm("Move this rental to History?")) return;
+        document.getElementById('status').innerText = "(Archiving...)";
+        
+        const inputs = document.querySelectorAll(`#tableBody tr`)[rowIdx-1].querySelectorAll('input');
+        const rowData = Array.from(inputs).map(input => input.value);
+
+        await fetch(SCRIPT_URL, {
+            method: "POST",
+            body: JSON.stringify({ action: "archive", row: rowIdx, data: rowData })
+        });
+        location.reload(); // Refresh to show cleared row
+    }
+
+    loadData();
+</script>
+
+</body>
+</html>
